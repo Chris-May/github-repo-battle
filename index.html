@@ -1,0 +1,254 @@
+<!doctype html>
+<html class="no-js" lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="x-ua-compatible" content="ie=edge">
+  <title>GitHub Repository Battle</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <link rel="stylesheet" href="main.css">
+</head>
+<body>
+  <div class="battle-zone">
+
+    <h1 class="page-title">
+      <span class="page-title__small">The Battle of</span>
+      GitHub Repos
+    </h1>
+
+    <form action="#" id="battle-zone__form" class="battle-zone__form" v-on:submit.prevent="onFormSubmit">
+      <div class="repo-section__wrapper">
+        
+        <div class="repo-section">
+          <label class="repo-section__label{{winner === repos.firstRepo ? ' winningRepo' : ''}}">
+            Repo 1 URL
+            <input id="firstInput" name="firstInput" v-model="firstInput" type="text" class="repo-section__input" placeholder="https://github.com/">
+          </label>
+          <div class="repoStat__section" v-if="repos.firstRepo.stars > 1"  v-cloak>
+            <dl class="repoStat__wrapper">
+              <dt class="repoStat__key">Star Count</dt>
+              <dd class="repoStat__value">{{repos.firstRepo.stars | thousandString}}</dd>
+            </dl>
+            <dl class="repoStat__wrapper">
+              <dt class="repoStat__key">Watcher Count</dt>
+              <dd class="repoStat__value">{{repos.firstRepo.watcherCount | thousandString}}</dd>
+            </dl>
+            <dl class="repoStat__wrapper">
+              <dt class="repoStat__key">Fork Count</dt>
+              <dd class="repoStat__value">{{repos.firstRepo.forkCount | thousandString}}</dd>
+            </dl>
+          </div>
+        </div>
+
+        <div class="repo-section">
+          <label class="repo-section__label{{winner === repos.secondRepo ? ' winningRepo' : ''}}">
+            Repo 2 URL
+            <input id="secondInput" name="secondInput" v-model="secondInput" type="text" class="repo-section__input" placeholder="https://github.com/">
+          </label>
+          <div class="repoStat__section"  v-if="repos.secondRepo.stars > 1" v-cloak>
+            <dl class="repoStat__wrapper">
+              <dt class="repoStat__key">Star Count</dt>
+              <dd class="repoStat__value">{{repos.secondRepo.stars | thousandString}}</dd>
+            </dl>
+            <dl class="repoStat__wrapper">
+              <dt class="repoStat__key">Watcher Count</dt>
+              <dd class="repoStat__value">{{repos.secondRepo.watcherCount | thousandString}}</dd>
+            </dl>
+            <dl class="repoStat__wrapper">
+              <dt class="repoStat__key">Fork Count</dt>
+              <dd class="repoStat__value">{{repos.secondRepo.forkCount | thousandString}}</dd>
+            </dl>
+          </div>
+        </div>
+      </div>
+
+      <h1 class="winner" v-if="winner" v-cloak>
+        {{winner.repo}} is the winner<br>with {{winner.stars | thousandString}} stars!
+      </h1>
+
+      <button type="submit" class="battle-zone__submit">Let's do battle</button>
+    </form>
+
+  </div>
+
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/1.0.13/vue.js"></script>
+  <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.8.3/underscore-min.js"></script>
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
+
+
+  <script>
+    var GitHubURL = "github.com/",
+    blankRepo = {
+      forkCount: -1,
+      name: '',
+      repo: '',
+      stars: -1,
+      url: '',
+      user: '',
+      watcherCount: -1,
+    };
+
+    // Create a string with commas at 3 digit intervals
+    Vue.filter('thousandString', function (value) {
+      return value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    });
+
+
+    var app = new Vue({
+      el: 'body',
+      
+      data: {
+        firstInput: '',
+        secondInput: '',
+        repos: {
+          firstRepo: _.extend(_.clone(blankRepo), {name: 'firstRepo'}),
+          secondRepo: _.extend(_.clone(blankRepo), {name: 'secondRepo'})
+        },
+        winner: false
+      },
+
+      computed: {
+        repoArray: function() {
+          return _.toArray(this.repos);
+        }
+      },
+
+      methods: {
+        parseGHurl: function (url) {
+          // Remove github base URL
+          if (url.indexOf(GitHubURL) > -1) {
+            url = url.split(GitHubURL)[1]
+          };
+
+          // Make sure user didn't type in /user/repo alone
+          // if so, remove "/"
+          if (url[0] === "/") {
+            url = url.slice(1);
+          }
+
+          // Splitting url will return
+          // [user, repo]
+          // (and we'll ignore anything else)
+          urlComponents = url.split('/');
+          return {user: urlComponents[0], repo: urlComponents[1]}
+        },
+
+        handleGHresponse: function (response) {
+          // Because this is async, we need to match the response with the repo object
+          // Not the cleanest way to do this, but I would redo a lot with refactoring
+          var matchingRepo = _.findWhere(app.repoArray, {repo: response.name});
+
+          // The repo location is app.repos.repoName
+          // Need to $set it via $set('repos.repoName', obj)
+          var repoLocation = 'repos.' + matchingRepo.name;
+
+          // Build a new repo object from blank objects
+          var repoInfo = _.extend(
+            blankRepo,
+            app.getRepoStats(response),
+            {
+              name: matchingRepo.name,
+              url: matchingRepo.url
+            }
+          );
+
+          // Set each individual value for performance
+          _.each(repoInfo, function(value, key) {
+            app.$set(repoLocation + '.' + key, value);
+          });
+
+          app.checkForWinner();
+        },
+
+        ajaxGHinfo: function (repo) {
+          var url = 'https://api.github.com/repos/' + repo.user + '/' + repo.repo;
+
+          $.getJSON(url, this.handleGHresponse);
+        },
+
+        getRepoStats: function (response) {
+          return {
+            stars: response.stargazers_count,
+            watcherCount: response.subscribers_count,
+            forkCount: response.forks,
+            repo: response.name,
+            user: response.full_name.split('/')[0],
+          }
+        },
+
+        checkForWinner: function() {
+          var repoList = this.repoArray,
+          hasStars = function (repo) {
+            return repo.stars > -1;
+          }
+
+          if ( _.all(repoList, hasStars) ) {
+            var starCount = function(repo) {return repo.stars;},
+
+            winner = _.max(repoList, starCount);
+            console.log('declaring', winner, 'winner!!!');
+            app.$set('winner', winner);
+          } else {
+            app.$set('winner', false);
+          }
+        },
+
+        isValidContest: function() {
+          var isValidRepo = function (repo) {
+            return repo.name && repo.repo && repo.url && repo.user
+          };
+
+          return _.all(this.repoArray, isValidRepo);
+        },
+
+        onFormSubmit: function() {
+          if (this.isValidContest()) {
+            _.each(app.repoArray, function(repo) {
+              this.ajaxGHinfo(repo);
+            }, this);
+          } else {
+            console.error("Invalid contest");
+          }
+        }
+      },
+      ready: function () {
+
+        // Warning, below is not best practice.
+        // I would prefer to refactor this into using components for the repositories, but I thought this way would be faster.
+        this.$watch('firstInput', function(val) {
+          var urlComponents = this.parseGHurl(val);
+
+          // Clear winner if it's set
+          this.$set('winner', false);
+
+          // clear and update repo stats
+          this.$set('repos.firstRepo.url', val);
+          this.$set('repos.firstRepo.user', urlComponents.user);
+          this.$set('repos.firstRepo.repo', urlComponents.repo);
+          this.$set('repos.firstRepo.stars', -1);
+          this.$set('repos.firstRepo.forkCount', -1);
+          this.$set('repos.firstRepo.watcherCount', -1);
+        });
+
+        this.$watch('secondInput', function(val) {
+          var urlComponents = this.parseGHurl(val);
+
+          // Clear winner if it's set
+          this.$set('winner', false);
+
+          // clear and update repo stats
+          this.$set('repos.secondRepo.url', val);
+          this.$set('repos.secondRepo.user', urlComponents.user);
+          this.$set('repos.secondRepo.repo', urlComponents.repo);
+          this.$set('repos.secondRepo.stars', -1);
+          this.$set('repos.secondRepo.forkCount', -1);
+          this.$set('repos.secondRepo.watcherCount', -1);
+        });
+
+      }
+    });
+
+</script>
+</body>
+</html>
